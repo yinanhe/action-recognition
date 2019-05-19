@@ -1,6 +1,6 @@
 import os
 import shutil
-
+os.environ['CUDA_VISIBLE_DEVICES']='0'
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -13,39 +13,42 @@ from model import *
 from train_options import parser
 
 def train(train_loader, model, criterion, optimizer, epoch):
-	losses = AverageMeter()
+	losses = AverageMeter()# 用AverageMeter来管理更新等
 	top1 = AverageMeter()
 	top5 = AverageMeter()
 
-	model.train()	# switch to train mode
+	model.train()	# 切换到训练模式
 
 	for i, (input, target, _) in enumerate(train_loader):
 
-		# wrap inputs and targets in Variable
+		# 输入和目标转化成Variable
 		input_var = torch.autograd.Variable(input)
 		target_var = torch.autograd.Variable(target)
 		input_var, target_var = input_var.cuda(), target_var.cuda()
 
-		# compute output
-		output = model(input_var[0])
-		weight = Variable(torch.Tensor(range(output.shape[0])) / sum(range(output.shape[0]))).cuda().view(-1,1).repeat(1, output.shape[1])
+		# 计算输出
+		output = model(input_var)
+		#print("计算输出",output.size())
+		weight = Variable(torch.Tensor(range(output.shape[1])) / sum(range(output.shape[1]))).cuda().view(-1,1).unsqueeze(0).repeat(output.shape[0],1, output.shape[2])
 		output = torch.mul(output, weight)
-		output = torch.mean(output, dim=0).unsqueeze(0)
-		loss = criterion(output, target_var)
+		output = torch.mean(output, dim=1)#.unsqueeze(1)
+		#print("输出",output.size())
+		#print('目标输出',target_var.size())
+		loss = criterion(output, target_var).mean()
 		losses.update(loss.item(), input.size(0))
 
-		# compute accuracy
+		# 计算精确度
 		prec1, prec5 = accuracy(output.data.cpu(), target, topk=(1, 5))
 		top1.update(prec1[0], input.size(0))
 		top5.update(prec5[0], input.size(0))
 
-		# zero the parameter gradients
+		# 梯度清零
 		optimizer.zero_grad()
 
-		# compute gradient
+		# 计算梯度，更新
 		loss.backward()
 		optimizer.step()
-
+		# 每10个epoch 展示
 		if i % 10 == 0:
 			print('Epoch: [{0}][{1}/{2}]\t'
 				'lr {lr:.5f}\t'
@@ -64,7 +67,7 @@ def validate(val_loader, model, criterion):
 	top1 = AverageMeter()
 	top5 = AverageMeter()
 
-	# switch to evaluate mode
+	# 切换到评估模式
 	model.eval()
 
 	for i, (input, target, _) in enumerate(val_loader):
@@ -75,12 +78,12 @@ def validate(val_loader, model, criterion):
 		input_var, target_var = input_var.cuda(), target_var.cuda()
 
 		# compute output
-		output = model(input_var[0])
-		weight = Variable(torch.Tensor(range(output.shape[0])) / sum(range(output.shape[0]))).cuda().view(-1,1).repeat(1, output.shape[1])
+		output = model(input_var)
+		weight = Variable(torch.Tensor(range(output.shape[1])) / sum(range(output.shape[1]))).cuda().view(-1,1).unsqueeze(0).repeat(output.shape[0],1, output.shape[2])
 		output = torch.mul(output, weight)
-		output = torch.mean(output, dim=0).unsqueeze(0)
+		output = torch.mean(output, dim=1)#output = torch.mean(output, dim=0).unsqueeze(0)
 		loss = criterion(output, target_var)
-		losses.update(loss.item(), input.size(0))
+		losses.update(loss[0].item(), input.size(0))
 
 		# compute accuracy
 		prec1, prec5 = accuracy(output.data.cpu(), target, topk=(1, 5))
@@ -100,6 +103,7 @@ def validate(val_loader, model, criterion):
 	return (top1.avg, top5.avg)
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
+	# 保存模型
 	torch.save(state, os.path.join(args.data, 'save_model', filename))
 	if is_best:
 		shutil.copyfile(os.path.join(args.data, 'save_model', filename), os.path.join(args.data, 'save_model/model_best.pth.tar'))
@@ -122,6 +126,7 @@ class AverageMeter(object):
 
 
 def adjust_learning_rate(optimizer, epoch):
+	# 90%下降式学习率下降
 	if not epoch % args.lr_step and epoch:
 		for param_group in optimizer.param_groups:
 			param_group['lr'] = param_group['lr'] * 0.1
@@ -129,12 +134,14 @@ def adjust_learning_rate(optimizer, epoch):
 
 
 def accuracy(output, target, topk=(1,)):
+	# 计算精确度
 	maxk = max(topk)
+	# 获得batchsize
 	batch_size = target.size(0)
-
-	_, pred = output.topk(maxk, 1, True, True)
+	# 
+	_, pred = output.topk(maxk, 1, True, True)# 按照第一维度，得到maxk，返回最大值，并排序
 	pred = pred.t()
-	correct = pred.eq(target.view(1, -1).expand_as(pred))
+	correct = pred.eq(target.view(1, -1).expand_as(pred))# 使用eq计算
 
 	res = []
 	for k in topk:
@@ -144,13 +151,30 @@ def accuracy(output, target, topk=(1,)):
 
 
 def main():
+	#################
+	# 需要输入的参数有：
+	# args.data 训练集和验证集存在的文件
+	# args.batch-size 训练的batchsize
+	# args.workers 并行读取数据
+	# arg.model 预训练模型的模型
+	# arg.arch CNN模型的选择，默认是alexnet
+	# arg.lstm-layers LSTM层的数量，默认是1
+	# arg.hidden-size 隐藏层的数量，默认是512
+	# arg.fc-size LSTM前的全连接层数量，默认是1024
+	# arg.epochs epoch的数量，默认是150
+	# arg.lr 学习率 默认是0.01 
+	# arg.optim 优化器的选择,默认是sgd
+	# arg.momentum 动量选择，默认0.9
+	# arg.lr-step 学习率递减频率，默认是50
+	# arg.weight-decay 默认1e-4
+	###
 	global args
 
-	best_prec = 0
+	best_prec = 0# 最佳预测
 	args = parser.parse_args()
 
 	# Data Transform and data loading
-	traindir = os.path.join(args.data, 'train_data')
+	traindir = os.path.join(args.data, 'train_data')# data文件
 	valdir = os.path.join(args.data, 'valid_data')
 
 	normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
@@ -168,15 +192,23 @@ def main():
 									transforms.ToTensor()]
 									)
 				)
+	# transform = transforms.Compose([
+	# 								transforms.Resize(224),
+	# 								transforms.CenterCrop(224),
+	# 								transforms.ToTensor(),
+	# 								normalize]
+	# 								)
+	num_of_image_per_video = args.fpv			
 
 	train_dataset = dataset.loadedDataset(traindir, transform)
 
-	train_loader = torch.utils.data.DataLoader(train_dataset,
+	train_loader = torch.utils.data.DataLoader(#train_dataset,
+		dataset.loadedDataset(traindir, transform,num_of_image_per_video),
 		batch_size=args.batch_size, shuffle=True,
 		num_workers=args.workers, pin_memory=True)
 
 	val_loader = torch.utils.data.DataLoader(
-		dataset.loadedDataset(valdir, transform),
+		dataset.loadedDataset(valdir, transform,num_of_image_per_video),
 		batch_size=args.batch_size, shuffle=False,
 		num_workers=args.workers, pin_memory=True)
 

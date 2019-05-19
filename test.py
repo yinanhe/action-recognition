@@ -10,7 +10,6 @@ from torch.autograd import Variable
 import dataset
 from model import *
 
-
 parser = argparse.ArgumentParser(description = 'Testing')
 
 
@@ -30,20 +29,20 @@ def validate(val_loader, model, criterion, classes):
 		print('File Name: ' + name[0])
 
 		# target = target.cuda(async=True)
-		input_var = torch.autograd.Variable(input)
-		target_var = torch.autograd.Variable(target)
+		input_var = torch.autograd.Variable(input)#输入的视频帧
+		target_var = torch.autograd.Variable(target)#真实标签
 		input_var, target_var = input_var.cuda(), target_var.cuda()
 
 		# compute output
-		output = model(input_var[0])
-		weight = Variable(torch.Tensor(range(output.shape[0])) / sum(range(output.shape[0]))).cuda().view(-1,1).repeat(1, output.shape[1])
+		output = model(input_var)
+		weight = Variable(torch.Tensor(range(output.shape[1])) / sum(range(output.shape[1]))).cuda().view(-1,1).unsqueeze(0).repeat(output.shape[0],1, output.shape[2])
 		output = torch.mul(output, weight)
-		output = torch.mean(output, dim=0).unsqueeze(0)
-		loss = criterion(output, target_var)
+		output = torch.mean(output, dim=1)#output = torch.mean(output, dim=0).unsqueeze(0)
+		loss = criterion(output, target_var).mean()
 		losses.update(loss.item(), input.size(0))
 
 		# measure accuracy and record loss
-		prec1, prec5 = accuracy(output.data.cpu(), target, classes, topk=(1, 5))
+		prec1, prec5 = accuracy(output.data.cpu(), target, classes, topk=(1, 5))#分别获得网路目前输出的top1和top5，函数定义如下
 		top1.update(prec1[0], input.size(0))
 		top5.update(prec5[0], input.size(0))
 
@@ -77,8 +76,8 @@ def accuracy(output, target, classes, topk=(1,)):
 
 	_, pred = output.topk(maxk, 1, True, True)
 	pred = pred.t()
-	print('Predict: ' + classes[pred[0][0].numpy()] + '		Actual: ' + classes[target[0].numpy()])
-	correct = pred.eq(target.view(1, -1).expand_as(pred))
+	#print('Predict: ' + classes[pred[0][0].numpy()] + '		Actual: ' + classes[target[0].numpy()])
+	correct = pred.eq(target.view(1, -1).expand_as(pred))# 计算准确率
 
 	res = []
 	for k in topk:
