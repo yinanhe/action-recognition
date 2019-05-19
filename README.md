@@ -1,6 +1,6 @@
 # Action Recognition
 
-The network are based on CNNs and LSTMs.
+The network are based on CNNs and LSTMs. A little change.
 
 [简体中文](docs/README-zh.md)
 
